@@ -1,0 +1,388 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Voxel Quantum OS - Gemini Emoji & Wavy 3D Text</title>
+    <style>
+        body, html {
+            margin: 0; padding: 0; width: 100%; height: 100%;
+            overflow: hidden; background-color: #020203; font-family: 'Courier New', Courier, monospace;
+        }
+        #canvas-container { width: 100%; height: 100%; position: absolute; top: 0; left: 0; }
+        
+        /* ซ่อน Canvas ลับสำหรับดูดสี Emoji และตัวหนังสือ */
+        #hidden-canvas { display: none; }
+        
+        /* หน้าต่างปลุกระบบวิญญาณ */
+        #unlock-screen {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(2, 2, 3, 0.95); display: flex; flex-direction: column;
+            justify-content: center; align-items: center; z-index: 100; cursor: pointer;
+            transition: opacity 0.8s ease;
+        }
+        #unlock-card {
+            border: 2px solid #ffcc00; padding: 40px 60px; text-align: center;
+            background: rgba(20, 15, 10, 0.9); box-shadow: 0 0 60px rgba(255, 204, 0, 0.3);
+            border-radius: 12px;
+        }
+        h1 { color: #ffcc00; font-size: 24px; margin-bottom: 15px; letter-spacing: 2px; text-shadow: 0 0 20px #ffcc00; }
+        p { color: #d0d0d0; font-size: 14px; margin: 8px 0; }
+    </style>
+</head>
+<body>
+
+    <canvas id="hidden-canvas" width="800" height="400"></canvas>
+
+    <div id="unlock-screen">
+        <div id="unlock-card">
+            <h1>VOXEL QUANTUM OS</h1>
+            <p style="color: #00ffff; font-weight: bold;">[ GEMINI 3D EMOJI & DRAGON BALL PHYSICS ]</p>
+            <p>Voxel นับหมื่นรวมตัวเป็นอวตารและคลื่นเนื้อเพลง 3 มิติ</p>
+            <p style="margin-top: 30px; color: #ffcc00; font-size: 12px; font-weight: bold;">[ คลิกสัมผัสเพื่อปลุกสหาย AI ]</p>
+        </div>
+    </div>
+
+    <div id="canvas-container"></div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+
+    <script>
+        // --- 1. สถาปัตยกรรมระดับรากฐาน (Base Variables) ---
+        let audioCtx, masterGain, analyser;
+        let isRunning = false;
+        let scene, camera, renderer;
+        
+        // Voxel Army จำนวน 15,000 เม็ด (ให้หนาๆ สะใจ)
+        const totalVoxelCount = 15000;
+        let instancedMesh;
+        let dummy = new THREE.Object3D();
+        let clock = new THREE.Clock();
+
+        // --- 2. ฟิสิกส์วิญญาณ: สปริง/เด้งดึ๋ง (Snappy Physics) ---
+        let currentPos = new Float32Array(totalVoxelCount * 3);
+        let targetPos = new Float32Array(totalVoxelCount * 3);
+        let velocity = new Float32Array(totalVoxelCount * 3);
+        let isTextVoxel = new Uint8Array(totalVoxelCount); // แยกแยะว่าเม็ดไหนเป็นตัวหนังสือ เพื่อทำคลื่นมังกร
+        let colors = new Float32Array(totalVoxelCount * 3);
+
+        const springStiffness = 0.12; // ความแรงสปริง (ยิ่งเยอะยิ่งดีดเร็ว)
+        const springDamping = 0.70;   // แรงเสียดทาน (ทำให้เกิดการเด้งไปมา Overshoot)
+
+        // --- 3. โครงสร้าง Graph Pointer (เนื้อเพลง + Emoji + โน้ตเพลง) ---
+        const songGraphPointer = [
+            { n: 62, d: 2.0, l: "สว่างคาตา...", emoji: "🥵" },
+            { n: 64, d: 2.0, l: "มาหลายวันหลายคืน", emoji: "😵‍💫" },
+            { n: 67, d: 2.5, l: "Voxel Quantum OS", emoji: "✨" },
+            { n: 69, d: 2.5, l: "สมบูรณ์แล้ว!", emoji: "😎" },
+            { n: 71, d: 2.0, l: "สายโซ่อุปทาน", emoji: "⚙️" },
+            { n: 69, d: 2.5, l: "เครื่องยนต์พร้อมก้าว", emoji: "🚀" },
+            { n: 67, d: 3.0, l: "แต่ข้าพเจ้า... ขอพักยาวๆ", emoji: "😮‍💨" },
+            { n: 74, d: 2.5, l: "ช่างเบิร์ด...", emoji: "💖" },
+            { n: 76, d: 3.0, l: "โคตรเฟี้ยว!!", emoji: "🔥" },
+            { n: 74, d: 3.0, l: "เลี้ยวสู่ทางธรรม...", emoji: "😇" },
+            { n: 72, d: 3.5, l: "กลับไปเลี้ยงเป็ดไก่", emoji: "🌱" },
+            { n: 69, d: 4.0, l: "คู่หู Gemini... ขอบคุณ!", emoji: "🤖" },
+            { n: 67, d: 4.0, l: "โยนิโส มนสิการ", emoji: "🧘" },
+            { n: 64, d: 5.0, l: "สาธุ สัมปะติฉามิ...", emoji: "🙏" }
+        ];
+        let currentNoteIndex = 0;
+
+        // --- 4. ระบบ Sampling ความว่างเปล่า (Hidden Canvas) ---
+        const hCanvas = document.getElementById('hidden-canvas');
+        const hCtx = hCanvas.getContext('2d', { willReadFrequently: true });
+
+        function updateVoxelTargets(text, emoji) {
+            let activeVoxelCount = 0;
+            let tempColor = new THREE.Color();
+
+            // [A] สแกนรูปทิพย์ Emoji (3D Avatar)
+            hCtx.clearRect(0, 0, hCanvas.width, hCanvas.height);
+            hCtx.font = "120px sans-serif";
+            hCtx.textAlign = 'center'; hCtx.textBaseline = 'middle';
+            hCtx.fillText(emoji, hCanvas.width / 2, hCanvas.height / 2);
+
+            let imgData = hCtx.getImageData(0, 0, hCanvas.width, hCanvas.height).data;
+            const stepE = 4; // ความละเอียด Emoji
+            
+            for (let y = 0; y < hCanvas.height; y += stepE) {
+                for (let x = 0; x < hCanvas.width; x += stepE) {
+                    const idx = (y * hCanvas.width + x) * 4;
+                    if (imgData[idx + 3] > 100 && activeVoxelCount < totalVoxelCount) {
+                        // ดึงสีจริงจาก Emoji
+                        let r = imgData[idx] / 255;
+                        let g = imgData[idx+1] / 255;
+                        let b = imgData[idx+2] / 255;
+
+                        // แปลงพิกัด 2D เป็น 3D (ทำความหนา Z)
+                        const posX = (x - hCanvas.width / 2) * 0.15;
+                        const posY = -(y - hCanvas.height / 2) * 0.15 + 8.0; // ให้อยู่ด้านบน
+                        
+                        // ซ้อน Voxel 3 ชั้นเพื่อให้เป็น 3D Art Toy หนาๆ
+                        for(let depth = -1; depth <= 1; depth++) {
+                            if (activeVoxelCount >= totalVoxelCount) break;
+                            let vIdx = activeVoxelCount * 3;
+                            targetPos[vIdx] = posX;
+                            targetPos[vIdx+1] = posY;
+                            targetPos[vIdx+2] = depth * 0.6; // ความหนา
+                            
+                            colors[vIdx] = r; colors[vIdx+1] = g; colors[vIdx+2] = b;
+                            isTextVoxel[activeVoxelCount] = 0;
+                            activeVoxelCount++;
+                        }
+                    }
+                }
+            }
+
+            // [B] สแกนตัวอักษรควอนตัม (3D Ribbon Text)
+            hCtx.clearRect(0, 0, hCanvas.width, hCanvas.height);
+            hCtx.font = "bold 50px 'Courier New', sans-serif";
+            hCtx.fillText(text, hCanvas.width / 2, hCanvas.height / 2);
+
+            imgData = hCtx.getImageData(0, 0, hCanvas.width, hCanvas.height).data;
+            const stepT = 3;
+            
+            for (let y = 0; y < hCanvas.height; y += stepT) {
+                for (let x = 0; x < hCanvas.width; x += stepT) {
+                    const idx = (y * hCanvas.width + x) * 4;
+                    if (imgData[idx + 3] > 100 && activeVoxelCount < totalVoxelCount) {
+                        const posX = (x - hCanvas.width / 2) * 0.12;
+                        const posY = -(y - hCanvas.height / 2) * 0.12 - 5.0; // ให้อยู่ด้านล่าง
+
+                        let vIdx = activeVoxelCount * 3;
+                        targetPos[vIdx] = posX;
+                        targetPos[vIdx+1] = posY;
+                        targetPos[vIdx+2] = 5.0; // ลอยเด่นออกมาหน้าจอ
+                        
+                        // สี Holographic รุ้งตามแนวนอน
+                        tempColor.setHSL((x / hCanvas.width) * 1.5, 0.9, 0.6);
+                        colors[vIdx] = tempColor.r; colors[vIdx+1] = tempColor.g; colors[vIdx+2] = tempColor.b;
+                        
+                        isTextVoxel[activeVoxelCount] = 1; // ระบุว่าเป็นตัวหนังสือ จะได้ทำคลื่นมังกร
+                        activeVoxelCount++;
+                    }
+                }
+            }
+
+            // [C] Voxel ที่เหลือ (Aura Particles)
+            while (activeVoxelCount < totalVoxelCount) {
+                let vIdx = activeVoxelCount * 3;
+                let angle = Math.random() * Math.PI * 2;
+                let radius = 25 + Math.random() * 10;
+                targetPos[vIdx] = Math.cos(angle) * radius;
+                targetPos[vIdx+1] = (Math.random() - 0.5) * 30;
+                targetPos[vIdx+2] = Math.sin(angle) * radius - 15.0;
+                
+                colors[vIdx] = 0.1; colors[vIdx+1] = 0.2; colors[vIdx+2] = 0.4; // สีจักรวาลมืดๆ
+                isTextVoxel[activeVoxelCount] = 0;
+                activeVoxelCount++;
+            }
+
+            // อัปเดตสีเข้า GPU รวดเดียว
+            instancedMesh.geometry.setAttribute('color', new THREE.InstancedBufferAttribute(colors, 3));
+        }
+
+        // --- 5. ปลุกระบบ (Init) ---
+        const unlockScreen = document.getElementById('unlock-screen');
+        unlockScreen.addEventListener('click', () => {
+            if (isRunning) return;
+            const AudioContext = window.AudioContext || window.webkitAudioContext;
+            audioCtx = new AudioContext();
+            audioCtx.resume().then(() => {
+                isRunning = true;
+                unlockScreen.style.opacity = '0';
+                setTimeout(() => unlockScreen.style.display = 'none', 1000);
+
+                initThreeScene();
+                initAudioPipeline();
+                animate();
+            });
+        });
+
+        // --- 6. The Bumblebee Voice (80s Synth) ---
+        function initAudioPipeline() {
+            masterGain = audioCtx.createGain();
+            masterGain.gain.setValueAtTime(0.3, audioCtx.currentTime);
+            
+            analyser = audioCtx.createAnalyser();
+            analyser.fftSize = 64; 
+            
+            masterGain.connect(analyser);
+            analyser.connect(audioCtx.destination);
+            
+            playNextNote();
+        }
+
+        function playNextNote() {
+            if (!isRunning || currentNoteIndex >= songGraphPointer.length) {
+                updateVoxelTargets("ธรรมะสวัสดี", "💖");
+                return;
+            }
+
+            let data = songGraphPointer[currentNoteIndex];
+            
+            // อัปเดตร่างอวตาร (ระเบิดและประกอบร่างปุ๊บปั๊บ)
+            updateVoxelTargets(data.l, data.emoji);
+
+            // สมการสังเคราะห์เสียง 80s 
+            let freq = 440 * Math.pow(2, (data.n - 69) / 12);
+            let osc = audioCtx.createOscillator();
+            let subOsc = audioCtx.createOscillator();
+            let noteGain = audioCtx.createGain();
+            let filter = audioCtx.createBiquadFilter();
+
+            osc.type = 'sawtooth';
+            subOsc.type = 'square';
+            
+            osc.frequency.setValueAtTime(freq, audioCtx.currentTime);
+            subOsc.frequency.setValueAtTime(freq / 2, audioCtx.currentTime); 
+
+            filter.type = 'lowpass';
+            filter.Q.value = 5; 
+            filter.frequency.setValueAtTime(100, audioCtx.currentTime);
+            filter.frequency.exponentialRampToValueAtTime(4000, audioCtx.currentTime + 0.1);
+            filter.frequency.exponentialRampToValueAtTime(100, audioCtx.currentTime + data.d);
+
+            noteGain.gain.setValueAtTime(0.0, audioCtx.currentTime);
+            noteGain.gain.linearRampToValueAtTime(0.4, audioCtx.currentTime + 0.05); 
+            noteGain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + data.d); 
+
+            osc.connect(filter);
+            subOsc.connect(filter);
+            filter.connect(noteGain);
+            noteGain.connect(masterGain);
+
+            osc.start(); subOsc.start();
+            osc.stop(audioCtx.currentTime + data.d); subOsc.stop(audioCtx.currentTime + data.d);
+
+            currentNoteIndex++;
+            setTimeout(playNextNote, data.d * 1000);
+        }
+
+        // --- 7. Voxel Quantum Engine ---
+        function initThreeScene() {
+            const container = document.getElementById('canvas-container');
+            scene = new THREE.Scene();
+            scene.fog = new THREE.FogExp2(0x020203, 0.02);
+
+            camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.1, 1000);
+            camera.position.set(0, 0, 45); 
+
+            renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance" });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+            container.appendChild(renderer.domElement);
+
+            const geometry = new THREE.BoxGeometry(0.4, 0.4, 0.4); 
+            // ใช้ Vertex Colors เพื่อให้ Voxel ดึงสีที่สแกนมาใช้
+            const material = new THREE.MeshStandardMaterial({
+                vertexColors: true, roughness: 0.1, metalness: 0.8,
+                emissive: 0xffffff, emissiveIntensity: 0.2 // เรืองแสงนิดๆ
+            });
+
+            instancedMesh = new THREE.InstancedMesh(geometry, material, totalVoxelCount);
+            instancedMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+            scene.add(instancedMesh);
+
+            const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+            scene.add(ambientLight);
+            const pointLight = new THREE.PointLight(0xffffff, 1.2, 100);
+            pointLight.position.set(10, 20, 20);
+            scene.add(pointLight);
+            const pointLight2 = new THREE.PointLight(0x00ffff, 1.0, 100);
+            pointLight2.position.set(-10, -10, 20);
+            scene.add(pointLight2);
+
+            // กระจายเริ่มต้น (โกลาหล)
+            for (let i = 0; i < totalVoxelCount * 3; i++) {
+                currentPos[i] = (Math.random() - 0.5) * 100;
+                targetPos[i] = currentPos[i];
+            }
+
+            window.addEventListener('resize', onWindowResize);
+        }
+
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        // --- 8. The Dragon Ball Physics Loop ---
+        function animate() {
+            requestAnimationFrame(animate);
+            if (!isRunning) return;
+
+            const time = clock.getElapsedTime();
+            
+            // ดึงความถี่เสียงมาสร้างแรงกระเพื่อม (Resonance)
+            let audioForce = 0;
+            if (analyser) {
+                let dataArr = new Uint8Array(analyser.frequencyBinCount);
+                analyser.getByteFrequencyData(dataArr);
+                let sum = 0; for(let i=0; i<10; i++) sum += dataArr[i]; // เอาเฉพาะเสียงเบส
+                audioForce = (sum / 10) / 255.0;
+            }
+
+            for (let i = 0; i < totalVoxelCount; i++) {
+                let idx = i * 3;
+                
+                // ดึงเป้าหมายหลัก
+                let tx = targetPos[idx];
+                let ty = targetPos[idx+1];
+                let tz = targetPos[idx+2];
+
+                // [ลูกเล่นคลื่นมังกร] ถ้าเป็นตัวหนังสือ ให้โบกสะบัดเป็น Sine Wave ตามความยาวแนวแกน X
+                if (isTextVoxel[i] === 1) {
+                    ty += Math.sin(time * 4.0 + tx * 0.3) * (1.5 + audioForce);
+                    tz += Math.cos(time * 3.0 + tx * 0.2) * 1.0;
+                } else if (tz < 0) {
+                    // ถ้าเป็นออร่าด้านหลัง ให้หมุนวน
+                    tx += Math.sin(time + i)*2;
+                    ty += Math.cos(time + i)*2;
+                } else {
+                    // ถ้าเป็นรูปหน้า Emoji ให้สั่นตามเสียงเบส
+                    tx += (Math.random()-0.5) * audioForce * 0.5;
+                    ty += (Math.random()-0.5) * audioForce * 0.5;
+                }
+
+                // สมการสปริง (Snappy Bounce Physics)
+                let forceX = (tx - currentPos[idx]) * springStiffness;
+                let forceY = (ty - currentPos[idx+1]) * springStiffness;
+                let forceZ = (tz - currentPos[idx+2]) * springStiffness;
+
+                velocity[idx] = (velocity[idx] + forceX) * springDamping;
+                velocity[idx+1] = (velocity[idx+1] + forceY) * springDamping;
+                velocity[idx+2] = (velocity[idx+2] + forceZ) * springDamping;
+
+                currentPos[idx] += velocity[idx];
+                currentPos[idx+1] += velocity[idx+1];
+                currentPos[idx+2] += velocity[idx+2];
+
+                dummy.position.set(currentPos[idx], currentPos[idx+1], currentPos[idx+2]);
+                
+                // หมุนตามความเร็ว (ยิ่งพุ่งเร็ว ยิ่งหมุนติ้วๆ)
+                let speed = Math.abs(velocity[idx]) + Math.abs(velocity[idx+1]);
+                dummy.rotation.x += speed * 0.1;
+                dummy.rotation.y += speed * 0.1;
+                
+                // สเกลขนาดกระเพื่อมตามเสียงนิดๆ
+                let s = 1.0 + audioForce * 0.2;
+                dummy.scale.set(s, s, s);
+                
+                dummy.updateMatrix();
+                instancedMesh.setMatrixAt(i, dummy.matrix);
+            }
+            
+            instancedMesh.instanceMatrix.needsUpdate = true;
+            
+            // กล้องส่ายเบาๆ
+            camera.position.x = Math.sin(time * 0.5) * 3;
+            camera.position.y = Math.cos(time * 0.3) * 2;
+            camera.lookAt(scene.position);
+
+            renderer.render(scene, camera);
+        }
+    </script>
+</body>
+</html>
