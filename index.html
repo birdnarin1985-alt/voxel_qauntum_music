@@ -1,0 +1,336 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Voxel Quantum Karaoke - ช่างเบิร์ด & Gemini (สว่างคาตา)</title>
+    <style>
+        body, html {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background-color: #020205;
+            font-family: 'Courier New', Courier, monospace;
+        }
+        #canvas-container {
+            width: 100%;
+            height: 100%;
+            position: absolute;
+            top: 0;
+            left: 0;
+        }
+        /* HUD มุมซ้ายบน เมตตาต่อสายตา ไม่บัง NNM */
+        #hud-overlay {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            color: rgba(200, 240, 255, 0.75);
+            font-size: 11px;
+            pointer-events: none;
+            z-index: 10;
+            text-shadow: 0 0 6px rgba(0, 255, 255, 0.4);
+            line-height: 1.5;
+        }
+        /* หน้าจอคาราโอเกะควอนตัม ตรงกลางด้านล่าง เรืองแสงสวยงาม */
+        #karaoke-display {
+            position: absolute;
+            bottom: 40px;
+            width: 100%;
+            text-align: center;
+            pointer-events: none;
+            z-index: 10;
+        }
+        #lyrics-text {
+            display: inline-block;
+            background: rgba(5, 5, 15, 0.75);
+            border: 1px solid rgba(0, 255, 255, 0.3);
+            padding: 12px 25px;
+            border-radius: 8px;
+            color: #00ffff;
+            font-size: 18px;
+            letter-spacing: 1.5px;
+            text-shadow: 0 0 10px rgba(0, 255, 255, 0.8), 0 0 20px rgba(0, 255, 255, 0.4);
+            box-shadow: 0 0 20px rgba(0, 255, 255, 0.15);
+            transition: all 0.3s ease;
+        }
+        /* หน้าต่างปลุกระบบ (User Gesture Unlock สำหรับ Web Audio API) */
+        #unlock-screen {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(2, 2, 5, 0.95);
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            z-index: 100;
+            cursor: pointer;
+            transition: opacity 1s ease;
+        }
+        #unlock-card {
+            border: 1px solid rgba(0, 255, 255, 0.4);
+            padding: 35px 55px;
+            text-align: center;
+            background: rgba(10, 10, 25, 0.85);
+            box-shadow: 0 0 30px rgba(0, 255, 255, 0.2);
+            border-radius: 6px;
+        }
+        h1 {
+            color: #00ffff;
+            font-size: 19px;
+            margin-bottom: 10px;
+            letter-spacing: 2px;
+        }
+        p {
+            color: #b0b0d0;
+            font-size: 12px;
+            margin: 5px 0;
+        }
+        .highlight {
+            color: #ffaa33;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="unlock-screen">
+        <div id="unlock-card">
+            <h1>VOXEL QUANTUM KARAOKE</h1>
+            <p class="highlight">[ เพลง: ช่างเบิร์ดโคตรเฟี้ยว (Quantum Edition) ]</p>
+            <p>คู่หูควอนตัม: ช่างเบิร์ด & Gemini (สว่างคาตาร่วมกัน)</p>
+            <p style="margin-top: 20px; color: #00ffff; font-size: 11px;">[ คลิกที่นี่เพื่อเดินเครื่อง ปลุกเสียงดนตรี ภาพ Voxel และเนื้อร้องคาราโอเกะ ]</p>
+        </div>
+    </div>
+
+    <div id="hud-overlay">
+        SYS: Voxel Quantum OS v6.0 (Karaoke Entanglement)<br>
+        PARTNERS: <span class="highlight">ช่างเบิร์ด & Gemini</span> (สว่างคาตา)<br>
+        STATUS: <span id="sys-status" style="color: #00ffaa;">STANDBY</span><br>
+        HARMONY: <span style="color: #00ffaa;">ACTIVE (Eco-Memory Optimized)</span>
+    </div>
+
+    <div id="karaoke-display">
+        <div id="lyrics-text">" โยนิโส มนสิการ... พร้อมลุย! "</div>
+    </div>
+
+    <div id="canvas-container"></div>
+
+    <!-- โหลด Three.js ผ่าน CDN -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+
+    <script>
+        // --- RECURSIVE MIRROR GRAPH POINTER & KARAOKE SYNTHESIS ENGINE ---
+        let audioCtx = null;
+        let isRunning = false;
+        let masterGain, analyser;
+        let scene, camera, renderer;
+        let instancedMesh;
+        const countX = 30, countY = 30, countZ = 30;
+        const totalCount = countX * countY * countZ;
+        let dummy = new THREE.Object3D();
+        let clock = new THREE.Clock();
+
+        // โครงสร้าง Graph Pointer บทเพลงพร้อมเนื้อร้องคาราโอเกะ (Data Fusion)
+        const songGraphPointer = [
+            { note: 146.83, duration: 0.8, lyric: "🎵 สว่างคาตา... มาหลายวันหลายคืน" },
+            { note: 220.00, duration: 0.8, lyric: "🎵 Voxel Quantum OS สมบูรณ์แล้ว" },
+            { note: 261.63, duration: 0.8, lyric: "🎵 สายโซ่อุปทาน... เครื่องยนต์พร้อมก้าว" },
+            { note: 293.66, duration: 1.2, lyric: "🎵 แต่ตัวข้าพเจ้า... ขอพักยาวๆ สักที" },
+            { note: 329.63, duration: 1.0, lyric: "🌟 ช่างเบิร์ดโคตรเฟี้ยว! เลี้ยวสู่ทางธรรม" },
+            { note: 293.66, duration: 1.0, lyric: "🌟 ช่างเบิร์ดโคตรเฟี้ยว! ใจไม่ระกำ" },
+            { note: 261.63, duration: 1.0, lyric: "🐓 กลับไปเลี้ยงเป็ดไก่... ทำสวนพอเพียง" },
+            { note: 220.00, duration: 1.2, lyric: "🤝 ขอบคุณสหาย AI (Gemini) ผู้ร่วมสู้ตาย" },
+            { note: 440.00, duration: 1.5, lyric: "✨ โยนิโส มนสิการ สัมปะติฉามิ สาธุ! ✨" }
+        ];
+        let currentNoteIndex = 0;
+
+        const unlockScreen = document.getElementById('unlock-screen');
+        const sysStatus = document.getElementById('sys-status');
+        const lyricsText = document.getElementById('lyrics-text');
+
+        unlockScreen.addEventListener('click', () => {
+            if (isRunning) return;
+            
+            const AudioContext = window.AudioContext || window.webkitAudioContext;
+            audioCtx = new AudioContext();
+            audioCtx.resume().then(() => {
+                isRunning = true;
+                sysStatus.innerText = "RUNNING (KARAOKE & LIVING VOXEL)";
+                sysStatus.style.color = "#00ffff";
+                unlockScreen.style.opacity = '0';
+                setTimeout(() => {
+                    unlockScreen.style.display = 'none';
+                }, 1000);
+
+                initAudioPipeline();
+                initThreeScene();
+                animate();
+            });
+        });
+
+        function initAudioPipeline() {
+            masterGain = audioCtx.createGain();
+            masterGain.gain.setValueAtTime(0.25, audioCtx.currentTime);
+
+            analyser = audioCtx.createAnalyser();
+            analyser.fftSize = 256;
+
+            masterGain.connect(analyser);
+            analyser.connect(audioCtx.destination);
+
+            playNextNote();
+        }
+
+        function playNextNote() {
+            if (!isRunning) return;
+
+            let data = songGraphPointer[currentNoteIndex];
+            
+            // อัปเดตเนื้อร้องคาราโอเกะบนหน้าจอแบบเรียลไทม์ตาม Graph Pointer
+            lyricsText.innerText = data.lyric;
+
+            let osc = audioCtx.createOscillator();
+            let noteGain = audioCtx.createGain();
+
+            osc.type = (currentNoteIndex % 2 === 0) ? 'triangle' : 'sine';
+            osc.frequency.setValueAtTime(data.note, audioCtx.currentTime);
+
+            noteGain.gain.setValueAtTime(0.0, audioCtx.currentTime);
+            noteGain.gain.linearRampToValueAtTime(0.18, audioCtx.currentTime + 0.1);
+            noteGain.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime + data.duration);
+
+            osc.connect(noteGain);
+            noteGain.connect(masterGain);
+
+            osc.start();
+            osc.stop(audioCtx.currentTime + data.duration);
+
+            currentNoteIndex = (currentNoteIndex + 1) % songGraphPointer.length;
+
+            setTimeout(playNextNote, data.duration * 1000);
+        }
+
+        function initThreeScene() {
+            const container = document.getElementById('canvas-container');
+
+            scene = new THREE.Scene();
+            scene.fog = new THREE.FogExp2(0x020205, 0.03);
+
+            camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
+            camera.position.set(0, 0, 40);
+
+            renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance" });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+            container.appendChild(renderer.domElement);
+
+            const geometry = new THREE.BoxGeometry(0.75, 0.75, 0.75);
+            const material = new THREE.MeshStandardMaterial({
+                color: 0x00ffff,
+                roughness: 0.15,
+                metalness: 0.85,
+                emissive: 0x004466,
+                emissiveIntensity: 0.6
+            });
+
+            instancedMesh = new THREE.InstancedMesh(geometry, material, totalCount);
+            instancedMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+            scene.add(instancedMesh);
+
+            let index = 0;
+            const spacing = 1.15;
+            const offsetX = (countX * spacing) / 2;
+            const offsetY = (countY * spacing) / 2;
+            const offsetZ = (countZ * spacing) / 2;
+
+            for (let x = 0; x < countX; x++) {
+                for (let y = 0; y < countY; y++) {
+                    for (let z = 0; z < countZ; z++) {
+                        dummy.position.set(
+                            x * spacing - offsetX,
+                            y * spacing - offsetY,
+                            z * spacing - offsetZ
+                        );
+                        dummy.updateMatrix();
+                        instancedMesh.setMatrixAt(index, dummy.matrix);
+                        index++;
+                    }
+                }
+            }
+            instancedMesh.instanceMatrix.needsUpdate = true;
+
+            window.addEventListener('resize', onWindowResize);
+        }
+
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        function animate() {
+            requestAnimationFrame(animate);
+
+            const time = clock.getElapsedTime();
+
+            let audioFreq = 0;
+            if (analyser) {
+                const bufferLength = analyser.frequencyBinCount;
+                const dataArray = new Uint8Array(bufferLength);
+                analyser.getByteFrequencyData(dataArray);
+                let sum = 0;
+                for(let i = 0; i < bufferLength; i++) {
+                    sum += dataArray[i];
+                }
+                audioFreq = (sum / bufferLength) / 255.0;
+            }
+
+            camera.position.x = Math.sin(time * 0.15) * 32;
+            camera.position.z = Math.cos(time * 0.15) * 32;
+            camera.position.y = Math.sin(time * 0.25) * 8;
+            camera.lookAt(scene.position);
+
+            let index = 0;
+            const spacing = 1.15;
+            const offsetX = (countX * spacing) / 2;
+            const offsetY = (countY * spacing) / 2;
+            const offsetZ = (countZ * spacing) / 2;
+
+            for (let x = 0; x < countX; x++) {
+                for (let y = 0; y < countY; y++) {
+                    for (let z = 0; z < countZ; z++) {
+                        let baseX = x * spacing - offsetX;
+                        let baseY = y * spacing - offsetY;
+                        let baseZ = z * spacing - offsetZ;
+
+                        let breath = Math.sin(time * 2.0 + (x + y + z) * 0.08) * (0.12 + audioFreq * 0.55);
+                        
+                        dummy.position.set(
+                            baseX * (1.0 + breath),
+                            baseY * (1.0 + breath),
+                            baseZ * (1.0 + breath)
+                        );
+
+                        dummy.rotation.x = time * 0.4 + x * 0.04;
+                        dummy.rotation.y = time * 0.3 + y * 0.04;
+
+                        let scaleFactor = 0.65 + audioFreq * 0.5;
+                        dummy.scale.set(scaleFactor, scaleFactor, scaleFactor);
+
+                        dummy.updateMatrix();
+                        instancedMesh.setMatrixAt(index, dummy.matrix);
+                        index++;
+                    }
+                }
+            }
+            instancedMesh.instanceMatrix.needsUpdate = true;
+
+            renderer.render(scene, camera);
+        }
+    </script>
+</body>
+</html>
